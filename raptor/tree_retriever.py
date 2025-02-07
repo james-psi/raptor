@@ -1,6 +1,17 @@
+"""
+RAPTOR Tree Retriever
+Implements the retrieval process for finding relevant information in the tree structure.
+
+Process Overview:
+1. Configure retrieval parameters
+2. Process query/question
+3. Navigate tree to find relevant information
+4. Return context for answer generation
+"""
+
 import logging
 import os
-from typing import Dict, List, Set
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 import tiktoken
 from tenacity import retry, stop_after_attempt, wait_random_exponential
@@ -17,6 +28,14 @@ logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
 
 
 class TreeRetrieverConfig:
+    """
+    Configuration for tree retrieval process.
+    
+    Step 1: Configuration Setup
+    - Sets similarity thresholds
+    - Configures traversal parameters
+    - Sets up embedding model for queries
+    """
     def __init__(
         self,
         tokenizer=None,
@@ -104,8 +123,23 @@ class TreeRetrieverConfig:
 
 
 class TreeRetriever(BaseRetriever):
+    """
+    Handles retrieval of relevant information from the tree.
+    
+    Process Flow:
+    1. Initialize with tree and config
+    2. Process input query
+    3. Traverse tree to find relevant nodes
+    4. Collect and return context
+    """
 
     def __init__(self, config, tree) -> None:
+        """
+        Step 1: Initialize Retriever
+        - Set up configurations
+        - Store tree reference
+        - Prepare embedding model
+        """
         if not isinstance(tree, Tree):
             raise ValueError("tree must be an instance of Tree")
 
@@ -249,79 +283,114 @@ class TreeRetriever(BaseRetriever):
         context = get_text(selected_nodes)
         return selected_nodes, context
 
+    def get_relevant_nodes(
+        self,
+        query_embedding: List[float],
+        list_nodes: List[Node],
+        top_k: Optional[int] = None,
+        threshold: Optional[float] = None,
+        selection_mode: Optional[str] = None,
+    ) -> List[Node]:
+        """
+        Step 2: Find Relevant Nodes
+        
+        Process:
+        1. Calculate similarity between query and nodes
+        2. Select nodes based on criteria:
+           - Top-K most similar
+           - Above threshold
+        3. Return selected nodes
+        """
+        if top_k is None:
+            top_k = self.top_k
+        if threshold is None:
+            threshold = self.threshold
+        if selection_mode is None:
+            selection_mode = self.selection_mode
+
+        embeddings = get_embeddings(list_nodes, self.context_embedding_model)
+        distances = distances_from_embeddings(query_embedding, embeddings)
+        indices = indices_of_nearest_neighbors_from_distances(distances)
+
+        if selection_mode == "threshold":
+            best_indices = [
+                index for index in indices if distances[index] > threshold
+            ]
+        elif selection_mode == "top_k":
+            best_indices = indices[:top_k]
+
+        nodes_to_add = [list_nodes[idx] for idx in best_indices]
+        return nodes_to_add
+
     def retrieve(
         self,
         query: str,
-        start_layer: int = None,
-        num_layers: int = None,
-        top_k: int = 10, 
-        max_tokens: int = 3500,
+        start_layer: Optional[int] = None,
+        num_layers: Optional[int] = None,
+        top_k: Optional[int] = None,
         collapse_tree: bool = True,
-        return_layer_information: bool = False,
-    ) -> str:
+        return_layer_information: bool = True,
+    ) -> Union[str, Tuple[str, Dict[int, List[Node]]]]:
         """
-        Queries the tree and returns the most relevant information.
-
-        Args:
-            query (str): The query text.
-            start_layer (int): The layer to start from. Defaults to self.start_layer.
-            num_layers (int): The number of layers to traverse. Defaults to self.num_layers.
-            max_tokens (int): The maximum number of tokens. Defaults to 3500.
-            collapse_tree (bool): Whether to retrieve information from all nodes. Defaults to False.
-
-        Returns:
-            str: The result of the query.
+        Step 3: Tree Traversal and Retrieval
+        
+        Process:
+        1. Create query embedding
+        2. Start at specified layer
+        3. For each layer:
+           - Find similar nodes
+           - Get children of similar nodes
+           - Move to next layer
+        4. Collect all relevant information
+        5. Return context (and optionally layer info)
         """
+        if start_layer is None:
+            start_layer = self.start_layer or self.tree.num_layers
+        if num_layers is None:
+            num_layers = self.num_layers or self.tree.num_layers
+        if top_k is None:
+            top_k = self.top_k
 
-        if not isinstance(query, str):
-            raise ValueError("query must be a string")
-
-        if not isinstance(max_tokens, int) or max_tokens < 1:
-            raise ValueError("max_tokens must be an integer and at least 1")
-
-        if not isinstance(collapse_tree, bool):
-            raise ValueError("collapse_tree must be a boolean")
-
-        # Set defaults
-        start_layer = self.start_layer if start_layer is None else start_layer
-        num_layers = self.num_layers if num_layers is None else num_layers
-
-        if not isinstance(start_layer, int) or not (
-            0 <= start_layer <= self.tree.num_layers
-        ):
-            raise ValueError(
-                "start_layer must be an integer between 0 and tree.num_layers"
+        # Create query embedding
+        query_embedding = self.embedding_model.create_embedding(query)
+        
+        # Track nodes at each layer
+        layer_to_nodes = {}
+        current_layer = start_layer
+        
+        # Get initial nodes from starting layer
+        if current_layer in self.tree.layer_to_nodes:
+            current_nodes = self.tree.layer_to_nodes[current_layer]
+        else:
+            current_nodes = []
+            
+        # Traverse layers
+        for layer in range(current_layer, max(current_layer - num_layers, -1), -1):
+            relevant_nodes = self.get_relevant_nodes(
+                query_embedding, current_nodes, top_k=top_k
             )
+            layer_to_nodes[layer] = relevant_nodes
+            
+            if layer > 0:
+                # Get children for next layer
+                children = get_children(relevant_nodes)
+                current_nodes = [
+                    self.tree.all_nodes[child_idx]
+                    for child_idx in children
+                ]
 
-        if not isinstance(num_layers, int) or num_layers < 1:
-            raise ValueError("num_layers must be an integer and at least 1")
-
-        if num_layers > (start_layer + 1):
-            raise ValueError("num_layers must be less than or equal to start_layer + 1")
-
+        # Collect and format context
         if collapse_tree:
-            logging.info(f"Using collapsed_tree")
-            selected_nodes, context = self.retrieve_information_collapse_tree(
-                query, top_k, max_tokens
+            context = get_text(
+                [
+                    node
+                    for layer in layer_to_nodes.values()
+                    for node in layer
+                ]
             )
         else:
-            layer_nodes = self.tree.layer_to_nodes[start_layer]
-            selected_nodes, context = self.retrieve_information(
-                layer_nodes, query, num_layers
-            )
+            context = get_text(layer_to_nodes[min(layer_to_nodes.keys())])
 
         if return_layer_information:
-
-            layer_information = []
-
-            for node in selected_nodes:
-                layer_information.append(
-                    {
-                        "node_index": node.index,
-                        "layer_number": self.tree_node_index_to_layer[node.index],
-                    }
-                )
-
-            return context, layer_information
-
+            return context, layer_to_nodes
         return context

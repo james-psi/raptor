@@ -1,3 +1,13 @@
+"""
+RAPTOR Cluster Tree Builder
+Implements tree construction using clustering-based approach for organizing nodes.
+
+Process Overview:
+1. Configure clustering parameters
+2. Process input text into nodes
+3. Build tree using clustering algorithm
+"""
+
 import logging
 import pickle
 from concurrent.futures import ThreadPoolExecutor
@@ -15,6 +25,14 @@ logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
 
 
 class ClusterTreeConfig(TreeBuilderConfig):
+    """
+    Configuration for cluster-based tree building.
+    
+    Step 1: Configuration Setup
+    - Sets clustering parameters
+    - Configures dimension reduction
+    - Inherits base tree building settings
+    """
     def __init__(
         self,
         reduction_dimension=10,
@@ -39,7 +57,23 @@ class ClusterTreeConfig(TreeBuilderConfig):
 
 
 class ClusterTreeBuilder(TreeBuilder):
+    """
+    Builds tree structure using clustering approach.
+    
+    Process Flow:
+    1. Initialize with configuration
+    2. Process input text
+    3. Build tree using clustering
+    4. Create final tree structure
+    """
+
     def __init__(self, config) -> None:
+        """
+        Step 1: Initialize Builder
+        - Set up configurations
+        - Prepare clustering algorithm
+        - Initialize base tree builder
+        """
         super().__init__(config)
 
         if not isinstance(config, ClusterTreeConfig):
@@ -59,6 +93,24 @@ class ClusterTreeBuilder(TreeBuilder):
         layer_to_nodes: Dict[int, List[Node]],
         use_multithreading: bool = True,
     ) -> Dict[int, Node]:
+        """
+        Step 2: Tree Construction
+        
+        Process:
+        1. Start with bottom layer nodes
+        2. For each layer:
+           a. Get current layer nodes
+           b. Apply clustering algorithm
+           c. Create parent nodes for clusters
+           d. Build connections between layers
+        3. Continue until reaching top layer
+        
+        Parameters:
+        - current_level_nodes: Nodes in current layer
+        - all_tree_nodes: All nodes in tree
+        - layer_to_nodes: Mapping of layers to nodes
+        - use_multithreading: Whether to use parallel processing
+        """
         logging.info("Using Cluster TreeBuilder")
 
         next_node_index = len(all_tree_nodes)
@@ -66,6 +118,16 @@ class ClusterTreeBuilder(TreeBuilder):
         def process_cluster(
             cluster, new_level_nodes, next_node_index, summarization_length, lock
         ):
+            """
+            Step 3: Cluster Processing
+            
+            For each cluster:
+            1. Get texts from cluster nodes
+            2. Create summary of combined texts
+            3. Generate embeddings for summary
+            4. Create new parent node
+            5. Update tree structure
+            """
             try:
                 # Get and validate node texts
                 node_texts = get_text(cluster)
@@ -125,14 +187,14 @@ class ClusterTreeBuilder(TreeBuilder):
 
             return True  # Indicate successful processing
 
+        # Step 4: Layer Construction
         for layer in range(self.num_layers):
-
             new_level_nodes = {}
-
             logging.info(f"Constructing Layer {layer}")
 
             node_list_current_layer = get_node_list(current_level_nodes)
 
+            # Check if we can create more layers
             if len(node_list_current_layer) <= self.reduction_dimension + 1:
                 self.num_layers = layer
                 logging.info(
@@ -140,6 +202,7 @@ class ClusterTreeBuilder(TreeBuilder):
                 )
                 break
 
+            # Apply clustering
             clusters = self.clustering_algorithm.perform_clustering(
                 node_list_current_layer,
                 self.cluster_embedding_model,
@@ -147,8 +210,8 @@ class ClusterTreeBuilder(TreeBuilder):
                 **self.clustering_params,
             )
 
+            # Process clusters (parallel or sequential)
             lock = Lock()
-
             summarization_length = self.summarization_length
             logging.info(f"Summarization Length: {summarization_length}")
 
@@ -165,7 +228,6 @@ class ClusterTreeBuilder(TreeBuilder):
                         )
                         next_node_index += 1
                     executor.shutdown(wait=True)
-
             else:
                 for cluster in clusters:
                     process_cluster(
@@ -177,10 +239,12 @@ class ClusterTreeBuilder(TreeBuilder):
                     )
                     next_node_index += 1
 
+            # Update tree structure
             layer_to_nodes[layer + 1] = list(new_level_nodes.values())
             current_level_nodes = new_level_nodes
             all_tree_nodes.update(new_level_nodes)
 
+            # Create tree object for current state
             tree = Tree(
                 all_tree_nodes,
                 layer_to_nodes[layer + 1],

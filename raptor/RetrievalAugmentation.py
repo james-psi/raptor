@@ -1,3 +1,13 @@
+"""
+RAPTOR (Retrieval Augmented Processing Tree for Organized Responses)
+Main interface for document processing, tree construction, and question answering.
+
+Step-by-Step Process:
+1. Initialize RAPTOR with configurations
+2. Add documents to create the tree
+3. Use the tree for retrieving information and answering questions
+"""
+
 import logging
 import pickle
 
@@ -16,6 +26,14 @@ logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
 
 
 class RetrievalAugmentationConfig:
+    """
+    Configuration class for RAPTOR.
+    
+    Step 1: Configuration Setup
+    - Defines all parameters for tree building
+    - Sets up retrieval parameters
+    - Configures QA model settings
+    """
     def __init__(
         self,
         tree_builder_config=None,
@@ -152,16 +170,20 @@ class RetrievalAugmentationConfig:
 
 class RetrievalAugmentation:
     """
-    A Retrieval Augmentation class that combines the TreeBuilder and TreeRetriever classes.
-    Enables adding documents to the tree, retrieving information, and answering questions.
+    Main RAPTOR class that manages the entire process.
+    
+    Process Flow:
+    1. Initialization: Set up configurations
+    2. Document Addition: Process text and build tree
+    3. Retrieval: Search tree and answer questions
     """
 
     def __init__(self, config=None, tree=None):
         """
-        Initializes a RetrievalAugmentation instance with the specified configuration.
-        Args:
-            config (RetrievalAugmentationConfig): The configuration for the RetrievalAugmentation instance.
-            tree: The tree instance or the path to a pickled tree file.
+        Step 1: Initialize RAPTOR
+        - Set up configurations
+        - Initialize tree builder
+        - Prepare retriever and QA model
         """
         if config is None:
             config = RetrievalAugmentationConfig()
@@ -203,10 +225,15 @@ class RetrievalAugmentation:
 
     def add_documents(self, docs):
         """
-        Adds documents to the tree and creates a TreeRetriever instance.
-
-        Args:
-            docs (str): The input text to add to the tree.
+        Step 2: Document Processing and Tree Construction
+        
+        Process:
+        1. Check if tree exists (warn about overwriting)
+        2. Build new tree from text:
+           - Split text into chunks
+           - Create leaf nodes
+           - Build tree structure
+        3. Set up retriever for the new tree
         """
         if self.tree is not None:
             user_input = input(
@@ -230,20 +257,16 @@ class RetrievalAugmentation:
         return_layer_information: bool = True,
     ):
         """
-        Retrieves information and answers a question using the TreeRetriever instance.
-
-        Args:
-            question (str): The question to answer.
-            start_layer (int): The layer to start from. Defaults to self.start_layer.
-            num_layers (int): The number of layers to traverse. Defaults to self.num_layers.
-            max_tokens (int): The maximum number of tokens. Defaults to 3500.
-            use_all_information (bool): Whether to retrieve information from all nodes. Defaults to False.
-
-        Returns:
-            str: The context from which the answer can be found.
-
-        Raises:
-            ValueError: If the TreeRetriever instance has not been initialized.
+        Step 3: Information Retrieval
+        
+        Process:
+        1. Take question input
+        2. Navigate tree structure:
+           - Start from specified layer
+           - Find similar nodes
+           - Traverse down through relevant branches
+        3. Collect relevant context
+        4. Return information for QA
         """
         if self.retriever is None:
             raise ValueError(
@@ -271,20 +294,13 @@ class RetrievalAugmentation:
         return_layer_information: bool = False,
     ):
         """
-        Retrieves information and answers a question using the TreeRetriever instance.
-
-        Args:
-            question (str): The question to answer.
-            start_layer (int): The layer to start from. Defaults to self.start_layer.
-            num_layers (int): The number of layers to traverse. Defaults to self.num_layers.
-            max_tokens (int): The maximum number of tokens. Defaults to 3500.
-            use_all_information (bool): Whether to retrieve information from all nodes. Defaults to False.
-
-        Returns:
-            str: The answer to the question.
-
-        Raises:
-            ValueError: If the TreeRetriever instance has not been initialized.
+        Step 4: Question Answering
+        
+        Process:
+        1. Retrieve relevant context using tree
+        2. Format question and context
+        3. Send to QA model
+        4. Return generated answer
         """
         # if return_layer_information:
         context, layer_information = self.retrieve(
