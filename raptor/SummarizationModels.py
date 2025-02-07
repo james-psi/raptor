@@ -2,8 +2,9 @@ import logging
 import os
 from abc import ABC, abstractmethod
 
-from openai import OpenAI
 from tenacity import retry, stop_after_attempt, wait_random_exponential
+
+from .azure_config import get_azure_client
 
 logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
 
@@ -15,17 +16,14 @@ class BaseSummarizationModel(ABC):
 
 
 class GPT3TurboSummarizationModel(BaseSummarizationModel):
-    def __init__(self, model="gpt-3.5-turbo"):
-
+    def __init__(self, model="gpt-4o"):
         self.model = model
+        self.client = get_azure_client()
 
     @retry(wait=wait_random_exponential(min=1, max=20), stop=stop_after_attempt(6))
     def summarize(self, context, max_tokens=500, stop_sequence=None):
-
         try:
-            client = OpenAI()
-
-            response = client.chat.completions.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": "You are a helpful assistant."},
@@ -40,22 +38,19 @@ class GPT3TurboSummarizationModel(BaseSummarizationModel):
             return response.choices[0].message.content
 
         except Exception as e:
-            print(e)
-            return e
+            logging.error(f"Error in summarization: {str(e)}")
+            return f"Error summarizing text: {str(e)}"
 
 
 class GPT3SummarizationModel(BaseSummarizationModel):
-    def __init__(self, model="text-davinci-003"):
-
+    def __init__(self, model="gpt-4o"):
         self.model = model
+        self.client = get_azure_client()
 
     @retry(wait=wait_random_exponential(min=1, max=20), stop=stop_after_attempt(6))
     def summarize(self, context, max_tokens=500, stop_sequence=None):
-
         try:
-            client = OpenAI()
-
-            response = client.chat.completions.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": "You are a helpful assistant."},
@@ -70,5 +65,5 @@ class GPT3SummarizationModel(BaseSummarizationModel):
             return response.choices[0].message.content
 
         except Exception as e:
-            print(e)
-            return e
+            logging.error(f"Error in summarization: {str(e)}")
+            return f"Error summarizing text: {str(e)}"

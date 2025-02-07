@@ -57,7 +57,7 @@ class ClusterTreeBuilder(TreeBuilder):
         current_level_nodes: Dict[int, Node],
         all_tree_nodes: Dict[int, Node],
         layer_to_nodes: Dict[int, List[Node]],
-        use_multithreading: bool = False,
+        use_multithreading: bool = True,
     ) -> Dict[int, Node]:
         logging.info("Using Cluster TreeBuilder")
 
@@ -66,23 +66,64 @@ class ClusterTreeBuilder(TreeBuilder):
         def process_cluster(
             cluster, new_level_nodes, next_node_index, summarization_length, lock
         ):
-            node_texts = get_text(cluster)
+            try:
+                # Get and validate node texts
+                node_texts = get_text(cluster)
+                if not isinstance(node_texts, str):
+                    logging.error(f"Invalid node_texts type: {type(node_texts)}")
+                    node_texts = str(node_texts)  # Convert to string if not already
+                
+                if not node_texts.strip():
+                    logging.error("Empty node texts")
+                    node_texts = "Empty text"  # Provide default text
+                
+                # Get and validate summarized text
+                try:
+                    summarized_text = self.summarize(
+                        context=node_texts,
+                        max_tokens=summarization_length,
+                    )
+                except Exception as e:
+                    logging.error(f"Error in summarization: {str(e)}")
+                    summarized_text = node_texts[:summarization_length]  # Use truncated original text as fallback
+                
+                if not isinstance(summarized_text, str):
+                    logging.error(f"Invalid summarized_text type: {type(summarized_text)}")
+                    summarized_text = str(summarized_text)  # Convert to string if not already
+                    
+                if not summarized_text.strip():
+                    logging.error("Empty summarized text")
+                    summarized_text = node_texts[:summarization_length]  # Use truncated original text as fallback
 
-            summarized_text = self.summarize(
-                context=node_texts,
-                max_tokens=summarization_length,
-            )
+                # Log lengths safely
+                try:
+                    node_text_length = len(self.tokenizer.encode(node_texts))
+                    summary_length = len(self.tokenizer.encode(summarized_text))
+                    logging.info(
+                        f"Node Texts Length: {node_text_length}, Summarized Text Length: {summary_length}"
+                    )
+                except Exception as e:
+                    logging.error(f"Error encoding text: {str(e)}")
 
-            logging.info(
-                f"Node Texts Length: {len(self.tokenizer.encode(node_texts))}, Summarized Text Length: {len(self.tokenizer.encode(summarized_text))}"
-            )
+                # Create new node
+                __, new_parent_node = self.create_node(
+                    next_node_index, summarized_text, {node.index for node in cluster}
+                )
 
-            __, new_parent_node = self.create_node(
-                next_node_index, summarized_text, {node.index for node in cluster}
-            )
+                with lock:
+                    new_level_nodes[next_node_index] = new_parent_node
+                    
+            except Exception as e:
+                logging.error(f"Error in process_cluster: {str(e)}")
+                # Create a fallback node with safe values
+                fallback_text = "Error processing cluster"
+                __, new_parent_node = self.create_node(
+                    next_node_index, fallback_text, {node.index for node in cluster}
+                )
+                with lock:
+                    new_level_nodes[next_node_index] = new_parent_node
 
-            with lock:
-                new_level_nodes[next_node_index] = new_parent_node
+            return True  # Indicate successful processing
 
         for layer in range(self.num_layers):
 

@@ -1,15 +1,16 @@
 import logging
 import os
 
-from openai import OpenAI
-
-
 import getpass
 from abc import ABC, abstractmethod
 
 import torch
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 from transformers import T5ForConditionalGeneration, T5Tokenizer
+
+from .azure_config import get_azure_client
+
+logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
 
 
 class BaseQAModel(ABC):
@@ -19,41 +20,26 @@ class BaseQAModel(ABC):
 
 
 class GPT3QAModel(BaseQAModel):
-    def __init__(self, model="text-davinci-003"):
-        """
-        Initializes the GPT-3 model with the specified model version.
-
-        Args:
-            model (str, optional): The GPT-3 model version to use for generating summaries. Defaults to "text-davinci-003".
-        """
+    def __init__(self, model="gpt-4o"):
         self.model = model
-        self.client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+        self.client = get_azure_client()
 
     @retry(wait=wait_random_exponential(min=1, max=20), stop=stop_after_attempt(6))
     def answer_question(self, context, question, max_tokens=150, stop_sequence=None):
-        """
-        Generates a summary of the given context using the GPT-3 model.
-
-        Args:
-            context (str): The text to summarize.
-            max_tokens (int, optional): The maximum number of tokens in the generated summary. Defaults to 150.
-            stop_sequence (str, optional): The sequence at which to stop summarization. Defaults to None.
-
-        Returns:
-            str: The generated summary.
-        """
         try:
-            response = self.client.completions.create(
-                prompt=f"using the folloing information {context}. Answer the following question in less than 5-7 words, if possible: {question}",
-                temperature=0,
-                max_tokens=max_tokens,
-                top_p=1,
-                frequency_penalty=0,
-                presence_penalty=0,
-                stop=stop_sequence,
+            response = self.client.chat.completions.create(
                 model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are a Question Answering Portal"},
+                    {
+                        "role": "user",
+                        "content": f"Using the following information {context}. Answer the following question in less than 5-7 words, if possible: {question}"
+                    }
+                ],
+                temperature=0,
+                max_tokens=max_tokens
             )
-            return response.choices[0].text.strip()
+            return response.choices[0].message.content.strip()
 
         except Exception as e:
             print(e)
@@ -61,31 +47,14 @@ class GPT3QAModel(BaseQAModel):
 
 
 class GPT3TurboQAModel(BaseQAModel):
-    def __init__(self, model="gpt-3.5-turbo"):
-        """
-        Initializes the GPT-3 model with the specified model version.
-
-        Args:
-            model (str, optional): The GPT-3 model version to use for generating summaries. Defaults to "text-davinci-003".
-        """
+    def __init__(self, model="gpt-4o"):
         self.model = model
-        self.client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+        self.client = get_azure_client()
 
     @retry(wait=wait_random_exponential(min=1, max=20), stop=stop_after_attempt(6))
     def _attempt_answer_question(
         self, context, question, max_tokens=150, stop_sequence=None
     ):
-        """
-        Generates a summary of the given context using the GPT-3 model.
-
-        Args:
-            context (str): The text to summarize.
-            max_tokens (int, optional): The maximum number of tokens in the generated summary. Defaults to 150.
-            stop_sequence (str, optional): The sequence at which to stop summarization. Defaults to None.
-
-        Returns:
-            str: The generated summary.
-        """
         response = self.client.chat.completions.create(
             model=self.model,
             messages=[
@@ -121,7 +90,7 @@ class GPT4QAModel(BaseQAModel):
             model (str, optional): The GPT-3 model version to use for generating summaries. Defaults to "text-davinci-003".
         """
         self.model = model
-        self.client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+        self.client = get_azure_client()
 
     @retry(wait=wait_random_exponential(min=1, max=20), stop=stop_after_attempt(6))
     def _attempt_answer_question(

@@ -188,11 +188,38 @@ def get_text(node_list: List[Node]) -> str:
     Returns:
         str: Concatenated text.
     """
-    text = ""
-    for node in node_list:
-        text += f"{' '.join(node.text.splitlines())}"
-        text += "\n\n"
-    return text
+    try:
+        if not isinstance(node_list, list):
+            logging.error(f"Expected list of nodes, got {type(node_list)}")
+            return ""
+        
+        if not node_list:
+            logging.error("Empty node list")
+            return ""
+        
+        text_parts = []
+        for node in node_list:
+            try:
+                if node and hasattr(node, 'text'):
+                    if isinstance(node.text, str):
+                        cleaned_text = ' '.join(node.text.splitlines()).strip()
+                        if cleaned_text:
+                            text_parts.append(cleaned_text)
+                    else:
+                        logging.error(f"Node text is not a string: {type(node.text)}")
+            except Exception as e:
+                logging.error(f"Error processing node: {str(e)}")
+                continue
+        
+        if not text_parts:
+            logging.error("No valid text found in nodes")
+            return ""
+            
+        return "\n\n".join(text_parts)
+        
+    except Exception as e:
+        logging.error(f"Error in get_text: {str(e)}")
+        return ""
 
 
 def indices_of_nearest_neighbors_from_distances(distances: List[float]) -> np.ndarray:
