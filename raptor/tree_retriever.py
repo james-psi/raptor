@@ -328,6 +328,7 @@ class TreeRetriever(BaseRetriever):
         start_layer: Optional[int] = None,
         num_layers: Optional[int] = None,
         top_k: Optional[int] = None,
+        max_tokens: Optional[int] = 3500,
         collapse_tree: bool = True,
         return_layer_information: bool = True,
     ) -> Union[str, Tuple[str, Dict[int, List[Node]]]]:
@@ -343,6 +344,15 @@ class TreeRetriever(BaseRetriever):
            - Move to next layer
         4. Collect all relevant information
         5. Return context (and optionally layer info)
+
+        Args:
+            query: The query string to search for
+            start_layer: Which layer to start searching from (defaults to top)
+            num_layers: How many layers to traverse down
+            top_k: How many top matches to consider
+            max_tokens: Maximum number of tokens to include in context
+            collapse_tree: Whether to collapse all layers into one context
+            return_layer_information: Whether to return layer-wise node information
         """
         if start_layer is None:
             start_layer = self.start_layer or self.tree.num_layers
@@ -363,7 +373,7 @@ class TreeRetriever(BaseRetriever):
             current_nodes = self.tree.layer_to_nodes[current_layer]
         else:
             current_nodes = []
-            
+
         # Traverse layers
         for layer in range(current_layer, max(current_layer - num_layers, -1), -1):
             relevant_nodes = self.get_relevant_nodes(
@@ -373,7 +383,9 @@ class TreeRetriever(BaseRetriever):
             
             if layer > 0:
                 # Get children for next layer
-                children = get_children(relevant_nodes)
+                children_sets = get_children(relevant_nodes)
+                # Flatten the sets of children into a single list of unique indices
+                children = list(set().union(*children_sets))
                 current_nodes = [
                     self.tree.all_nodes[child_idx]
                     for child_idx in children
@@ -381,13 +393,20 @@ class TreeRetriever(BaseRetriever):
 
         # Collect and format context
         if collapse_tree:
-            context = get_text(
-                [
-                    node
-                    for layer in layer_to_nodes.values()
-                    for node in layer
-                ]
-            )
+            all_nodes = [node for layer in layer_to_nodes.values() for node in layer]
+            # Filter nodes based on max_tokens if specified
+            if max_tokens:
+                selected_nodes = []
+                total_tokens = 0
+                for node in all_nodes:
+                    node_tokens = len(self.tokenizer.encode(node.text))
+                    if total_tokens + node_tokens > max_tokens:
+                        break
+                    selected_nodes.append(node)
+                    total_tokens += node_tokens
+                context = get_text(selected_nodes)
+            else:
+                context = get_text(all_nodes)
         else:
             context = get_text(layer_to_nodes[min(layer_to_nodes.keys())])
 
